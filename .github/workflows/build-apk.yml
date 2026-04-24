@@ -15,7 +15,13 @@ jobs:
           node-version: 20
 
       - run: npm install
+
+      # 👇 ADICIONA ISSO
+      - run: npx cap init "VitalCare MedControl" com.vitalcare.medcontrol --web-dir=www
+
+      - run: npx cap add android
       - run: npx cap sync android
+
       - run: chmod +x android/gradlew
       - run: cd android && ./gradlew assembleDebug
 
