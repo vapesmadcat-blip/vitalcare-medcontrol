@@ -455,8 +455,9 @@
     }
     
     let regs=getRegs();const previsto=previstoInicial(med);
-    regs.push({id:nextId(regs),med:med.nome,dose:med.dose,previsto,administradoEm:null,intervalo:med.intervalo,proximaCampo:plusHours(previsto,med.intervalo),done:false,missed:false,delayed:false,early:false,earlyMinutes:0,sourceHistoryId:null,prescriptionId:med.prescriptionId,modoHorario:getModo(med),horaBase:med.horaBase||null});
-    setRegs(regs);render();setStatus(`📋 ${med.nome} iniciado via receita!`);
+    const newReg={id:nextId(regs),med:med.nome,dose:med.dose,previsto,administradoEm:null,intervalo:med.intervalo,proximaCampo:plusHours(previsto,med.intervalo),done:false,missed:false,delayed:false,early:false,earlyMinutes:0,sourceHistoryId:null,prescriptionId:med.prescriptionId,modoHorario:getModo(med),horaBase:med.horaBase||null};
+    regs.push(newReg);
+    setRegs(regs);scheduleNativeReg(newReg);render();setStatus(`📋 ${med.nome} iniciado via receita!`);
   }
 
   // ========== INICIAR INDIVIDUAL ==========
@@ -467,8 +468,9 @@
     if(!med){alert("Não encontrado ou inativo!");return}
     if(med.totalPrescribed>0&&(med.totalPrescribed-(med.dosesTaken||0)-(med.dosesMissed||0))<=0){alert("Tratamento finalizado!");return}
     let regs=getRegs();const previsto=previstoInicial(med);
-    regs.push({id:nextId(regs),med:med.nome,dose:med.dose,previsto,administradoEm:null,intervalo:med.intervalo,proximaCampo:plusHours(previsto,med.intervalo),done:false,missed:false,delayed:false,early:false,earlyMinutes:0,sourceHistoryId:null,prescriptionId:med.prescriptionId,modoHorario:getModo(med),horaBase:med.horaBase||null});
-    setRegs(regs);render();setStatus(`✨ ${med.nome} iniciado!`);
+    const newReg={id:nextId(regs),med:med.nome,dose:med.dose,previsto,administradoEm:null,intervalo:med.intervalo,proximaCampo:plusHours(previsto,med.intervalo),done:false,missed:false,delayed:false,early:false,earlyMinutes:0,sourceHistoryId:null,prescriptionId:med.prescriptionId,modoHorario:getModo(med),horaBase:med.horaBase||null};
+    regs.push(newReg);
+    setRegs(regs);scheduleNativeReg(newReg);render();setStatus(`✨ ${med.nome} iniciado!`);
   }
 
   // ========== ADMINISTRAÇÃO ==========
@@ -521,8 +523,11 @@
     else novaPrevista=plusHours(reg.previsto,reg.intervalo);
     const novoCampo=plusHours(novaPrevista,reg.intervalo);
     const newRemaining=(med.totalPrescribed||0)-med.dosesTaken-(med.dosesMissed||0);
+    cancelNativeReg(reg.id);
     if(newRemaining>0||med.totalPrescribed===0){
-      regs.push({id:nextId(regs),med:reg.med,dose:reg.dose,previsto:novaPrevista,administradoEm:null,intervalo:reg.intervalo,proximaCampo:novoCampo,done:false,missed:false,delayed:false,early:false,earlyMinutes:0,sourceHistoryId:reg.id,prescriptionId:reg.prescriptionId,modoHorario:getModo(med),horaBase:med.horaBase||reg.horaBase||null});
+      const newReg={id:nextId(regs),med:reg.med,dose:reg.dose,previsto:novaPrevista,administradoEm:null,intervalo:reg.intervalo,proximaCampo:novoCampo,done:false,missed:false,delayed:false,early:false,earlyMinutes:0,sourceHistoryId:reg.id,prescriptionId:reg.prescriptionId,modoHorario:getModo(med),horaBase:med.horaBase||reg.horaBase||null};
+      regs.push(newReg);
+      scheduleNativeReg(newReg);
     }
     setRegs(regs);render();setStatus(`✅ Administrado!`);
   }
@@ -533,14 +538,17 @@
     const meds=getMeds();const med=meds.find(m=>m.nome===reg.med);if(!med)return;
     reg.done=true;reg.missed=true;reg.administradoEm=new Date().toISOString();
     med.dosesMissed=(med.dosesMissed||0)+1;setMeds(meds);
+    cancelNativeReg(reg.id);
     if(med.conduta==='ignorar'){
       const proxima=(isAncorado(med)||reg.modoHorario==="ancorado")?proximaAncoraApos(reg.previsto,reg.intervalo,new Date().toISOString()):plusHours(reg.previsto,reg.intervalo);
-      regs.push({id:nextId(regs),med:reg.med,dose:reg.dose,previsto:proxima,administradoEm:null,intervalo:reg.intervalo,proximaCampo:plusHours(proxima,reg.intervalo),done:false,missed:false,delayed:false,early:false,earlyMinutes:0,sourceHistoryId:reg.id,prescriptionId:reg.prescriptionId,modoHorario:getModo(med),horaBase:med.horaBase||reg.horaBase||null});
+      const newReg={id:nextId(regs),med:reg.med,dose:reg.dose,previsto:proxima,administradoEm:null,intervalo:reg.intervalo,proximaCampo:plusHours(proxima,reg.intervalo),done:false,missed:false,delayed:false,early:false,earlyMinutes:0,sourceHistoryId:reg.id,prescriptionId:reg.prescriptionId,modoHorario:getModo(med),horaBase:med.horaBase||reg.horaBase||null};
+      regs.push(newReg);
+      scheduleNativeReg(newReg);
     }
     setRegs(regs);render();setStatus("⚠️ Esquecida");
   }
 
-  function deleteRecord(id){if(!confirm("Excluir?"))return;setRegs(getRegs().filter(r=>r.id!==id));render()}
+  function deleteRecord(id){if(!confirm("Excluir?"))return;cancelNativeReg(id);setRegs(getRegs().filter(r=>r.id!==id));render()}
 
   function toggleMedStatus(nome,active,prescId){
     const meds=getMeds();let med;
@@ -653,8 +661,91 @@
     reader.readAsText(file);
   }
 
+  // ========== NOTIFICAÇÕES NATIVAS (CAPACITOR) ==========
+  function getLocalNotifications(){
+    return window.Capacitor?.Plugins?.LocalNotifications || null;
+  }
+
+  async function ensureNativeNotifications(){
+    const LN=getLocalNotifications();
+    if(!LN)return false;
+    try{
+      if(LN.requestPermissions){
+        const perm=await LN.requestPermissions();
+        if(perm && perm.display && perm.display!=="granted")return false;
+      }
+      if(LN.createChannel){
+        try{
+          await LN.createChannel({
+            id:"medcontrol",
+            name:"MedControl",
+            description:"Alertas de administração de medicamentos",
+            importance:5,
+            visibility:1,
+            vibration:true,
+            sound:"default"
+          });
+        }catch(e){}
+      }
+      return true;
+    }catch(e){
+      console.warn("Permissão nativa indisponível",e);
+      return false;
+    }
+  }
+
+  async function scheduleNativeReg(reg){
+    const LN=getLocalNotifications();
+    if(!LN||!reg||reg.done)return false;
+    const at=new Date(reg.previsto);
+    if(isNaN(at.getTime())||at.getTime()<=Date.now()+1000)return false;
+    const ok=await ensureNativeNotifications();
+    if(!ok)return false;
+    try{
+      await LN.cancel({notifications:[{id:Number(reg.id)}]});
+      await LN.schedule({notifications:[{
+        id:Number(reg.id),
+        title:"💊 Hora do medicamento",
+        body:`${reg.med}${reg.dose?' · '+reg.dose:''}`,
+        schedule:{at,allowWhileIdle:true},
+        channelId:"medcontrol",
+        sound:"default",
+        autoCancel:false
+      }]});
+      return true;
+    }catch(e){
+      console.warn("Falha ao agendar notificação nativa",e);
+      return false;
+    }
+  }
+
+  async function cancelNativeReg(id){
+    const LN=getLocalNotifications();
+    if(!LN)return;
+    try{await LN.cancel({notifications:[{id:Number(id)}]})}catch(e){}
+  }
+
+  async function scheduleAllPendingNative(){
+    const pending=getRegs().filter(r=>!r.done);
+    let ok=0;
+    for(const reg of pending){if(await scheduleNativeReg(reg))ok++}
+    setStatus(ok?`🔔 ${ok} alerta(s) nativo(s) agendado(s)`:"🔔 Permissão ativada. Nenhum alerta futuro para agendar.");
+  }
+
   function checkAlerts(){
-    getRegs().forEach(reg=>{if(reg.done)return;const diff=(new Date(reg.previsto).getTime()-Date.now())/60000;if(diff<=5&&diff>0&&!notified.has(reg.id+"_s")){notified.add(reg.id+"_s");alert(`⏰ ${reg.med} em breve!`)}if(diff<=0&&diff>-10&&!notified.has(reg.id+"_n")){notified.add(reg.id+"_n");alert(`💊 Hora de ${reg.med}!`)}});
+    const nativeOn=!!getLocalNotifications();
+    getRegs().forEach(reg=>{
+      if(reg.done)return;
+      const diff=(new Date(reg.previsto).getTime()-Date.now())/60000;
+      if(diff<=5&&diff>0&&!notified.has(reg.id+"_s")){
+        notified.add(reg.id+"_s");
+        if(!nativeOn)alert(`⏰ ${reg.med} em breve!`);
+      }
+      if(diff<=0&&diff>-10&&!notified.has(reg.id+"_n")){
+        notified.add(reg.id+"_n");
+        if(!nativeOn)alert(`💊 Hora de ${reg.med}!`);
+      }
+    });
   }
 
   // ========== INIT ==========
@@ -666,7 +757,10 @@
     $("btnCadRec").onclick=cadastrarReceita;
     $("btnStartDose").onclick=iniciarIndividual;
     $("btnStartReceita").onclick=abrirModalReceitas;
-    $("btnAlertas").onclick=async()=>{if("Notification"in window)await Notification.requestPermission();setStatus("🔔 Alertas ativados")};
+    $("btnAlertas").onclick=async()=>{
+      if(getLocalNotifications())await scheduleAllPendingNative();
+      else{if("Notification"in window)await Notification.requestPermission();setStatus("🔔 Alertas web ativados")};
+    };
     $("btnBackup").onclick=backupData;$("btnRestore").onclick=()=>$("restoreFile").click();
     $("restoreFile").onchange=e=>{if(e.target.files[0])restoreData(e.target.files[0])};
     modal.onclick=e=>{if(e.target===modal){modal.style.display='none';pendingData=null}};
@@ -684,10 +778,10 @@
     if(getMeds().length===0){
       setMeds([{nome:"Dipirona",dose:"500 mg",intervalo:6,conduta:"lembrar",modoHorario:"dinamico",horaBase:null,ativo:true,isPrescription:false,prescriptionId:null,totalPrescribed:0,treatmentDays:0,dosesPerDay:4,dosesTaken:0,dosesMissed:0}]);
     }
-    render();setInterval(()=>{checkAlerts();render()},30000);checkAlerts();setStatus("💊 MedControl · Pronto!");
+    render();scheduleAllPendingNative();setInterval(()=>{checkAlerts();render()},30000);checkAlerts();setStatus("💊 MedControl · Pronto!");
   }
   init();
 })();
 </script>
 </body>
-  </html>
+              </html>
