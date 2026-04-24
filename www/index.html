@@ -663,7 +663,7 @@
 
   // ========== NOTIFICAÇÕES NATIVAS (CAPACITOR) ==========
   function getLocalNotifications(){
-    return window.Capacitor?.Plugins?.LocalNotifications || null;
+    return window.Capacitor?.Plugins?.LocalNotifications || window.Capacitor?.LocalNotifications || null;
   }
 
   async function ensureNativeNotifications(){
@@ -778,10 +778,10 @@
     if(getMeds().length===0){
       setMeds([{nome:"Dipirona",dose:"500 mg",intervalo:6,conduta:"lembrar",modoHorario:"dinamico",horaBase:null,ativo:true,isPrescription:false,prescriptionId:null,totalPrescribed:0,treatmentDays:0,dosesPerDay:4,dosesTaken:0,dosesMissed:0}]);
     }
-    render();scheduleAllPendingNative();setInterval(()=>{checkAlerts();render()},30000);checkAlerts();setStatus("💊 MedControl · Pronto!");
+    render();setInterval(()=>{checkAlerts();render()},30000);checkAlerts();setStatus("💊 MedControl · Pronto!");
   }
   init();
 })();
 </script>
 </body>
-              </html>
+</html>
