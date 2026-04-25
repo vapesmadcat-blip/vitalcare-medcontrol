@@ -7,5 +7,6 @@
     "@capacitor/cli": "latest",
     "@capacitor/core": "latest",
     "@capacitor/local-notifications": "latest"
-  }
+  },
+  "devDependencies": {}
 }
