@@ -1,85 +1,112 @@
 package com.vitalcare.medcontrol;
 
+import android.Manifest;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.media.AudioAttributes;
+import android.content.pm.PackageManager;
 import android.media.RingtoneManager;
-import android.net.Uri;
 import android.os.Build;
 
+import androidx.core.app.ActivityCompat;
 import androidx.core.app.NotificationCompat;
+import androidx.core.app.NotificationManagerCompat;
 
 public class AlarmReceiver extends BroadcastReceiver {
     private static final String CHANNEL_ID = "vitalcare_alarm_channel";
+    private static final String CHANNEL_SILENT_ID = "vitalcare_silent_channel";
+
+    private void ensureChannels(Context context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel alarm = new NotificationChannel(CHANNEL_ID, "Alarmes VitalCare", NotificationManager.IMPORTANCE_HIGH);
+            alarm.enableVibration(true);
+            alarm.setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM), null);
+
+            NotificationChannel silent = new NotificationChannel(CHANNEL_SILENT_ID, "Alertas silenciosos VitalCare", NotificationManager.IMPORTANCE_HIGH);
+            silent.enableVibration(false);
+            silent.setSound(null, null);
+
+            NotificationManager nm = context.getSystemService(NotificationManager.class);
+            if (nm != null) {
+                nm.createNotificationChannel(alarm);
+                nm.createNotificationChannel(silent);
+            }
+        }
+    }
 
     @Override
     public void onReceive(Context context, Intent intent) {
         String med = intent.getStringExtra("med");
         String dose = intent.getStringExtra("dose");
-        int alarmId = intent.getIntExtra("alarmId", (int) System.currentTimeMillis());
-        if (med == null || med.trim().isEmpty()) med = "Medicamento";
+        String mode = intent.getStringExtra("mode");
+        int id = intent.getIntExtra("id", (int)(System.currentTimeMillis() % 100000));
+
+        if (med == null) med = "Medicamento";
         if (dose == null) dose = "";
+        if (mode == null) mode = "due";
 
-        createChannel(context);
+        ensureChannels(context);
 
-        Intent fullScreenIntent = new Intent(context, AlarmActivity.class);
-        fullScreenIntent.putExtra("med", med);
-        fullScreenIntent.putExtra("dose", dose);
-        fullScreenIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        boolean silent = mode.contains("silent");
+        boolean full = mode.equals("due") || mode.equals("due_silent");
 
-        PendingIntent fullScreenPendingIntent = PendingIntent.getActivity(
+        String title;
+        String body;
+        if (mode.startsWith("pre")) {
+            title = "⏰ Dose em 5 minutos";
+            body = med + " " + dose;
+        } else if (mode.startsWith("post")) {
+            title = "⚠️ Dose pendente";
+            body = med + " " + dose + " · passou 5 minutos";
+        } else {
+            title = "💊 Hora da dose";
+            body = med + " " + dose;
+        }
+
+        Intent fullIntent = new Intent(context, AlarmActivity.class);
+        fullIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        fullIntent.putExtra("med", med);
+        fullIntent.putExtra("dose", dose);
+        fullIntent.putExtra("mode", mode);
+
+        PendingIntent fullPi = PendingIntent.getActivity(
                 context,
-                alarmId,
-                fullScreenIntent,
+                id + 700000,
+                fullIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );
 
-        Uri alarmSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
-        if (alarmSound == null) alarmSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
+        String channel = silent ? CHANNEL_SILENT_ID : CHANNEL_ID;
 
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(context, CHANNEL_ID)
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(context, channel)
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
-                .setContentTitle("💊 Hora da dose")
-                .setContentText((med + " " + dose).trim())
+                .setContentTitle(title)
+                .setContentText(body)
                 .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_ALARM)
-                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-                .setSound(alarmSound)
-                .setVibrate(new long[]{0, 1000, 500, 1000, 500, 1000})
-                .setAutoCancel(false)
-                .setOngoing(true)
-                .setFullScreenIntent(fullScreenPendingIntent, true)
-                .setContentIntent(fullScreenPendingIntent);
+                .setContentIntent(fullPi)
+                .setAutoCancel(true);
 
-        NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
-        if (manager != null) manager.notify(alarmId, builder.build());
-    }
+        if (silent) {
+            builder.setSilent(true).setVibrate(new long[]{0});
+        } else {
+            builder.setSound(RingtoneManager.getDefaultUri(full ? RingtoneManager.TYPE_ALARM : RingtoneManager.TYPE_NOTIFICATION))
+                   .setVibrate(new long[]{0,1000,500,1000,500,1000});
+        }
 
-    private void createChannel(Context context) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
-        NotificationManager manager = context.getSystemService(NotificationManager.class);
-        if (manager == null) return;
+        if (full) {
+            builder.setFullScreenIntent(fullPi, true);
+        }
 
-        Uri alarmSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
-        AudioAttributes audioAttributes = new AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_ALARM)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .build();
+        if (Build.VERSION.SDK_INT < 33 || ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+            NotificationManagerCompat.from(context).notify(id, builder.build());
+        }
 
-        NotificationChannel channel = new NotificationChannel(
-                CHANNEL_ID,
-                "Alarmes VitalCare",
-                NotificationManager.IMPORTANCE_HIGH
-        );
-        channel.setDescription("Alertas críticos de medicação");
-        channel.enableVibration(true);
-        channel.setVibrationPattern(new long[]{0, 1000, 500, 1000});
-        channel.setSound(alarmSound, audioAttributes);
-        channel.setLockscreenVisibility(android.app.Notification.VISIBILITY_PUBLIC);
-        manager.createNotificationChannel(channel);
+        if (full) {
+            context.startActivity(fullIntent);
+        }
     }
 }
